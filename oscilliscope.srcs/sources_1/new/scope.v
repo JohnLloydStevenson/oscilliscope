@@ -25,7 +25,6 @@ module scope(
     output LCD_RST,
     output LCD_DCX,
     output LCD_WRX,
-    output LCD_RDX,
     output [15:0] LCD_Data
     );
 endmodule
