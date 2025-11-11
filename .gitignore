@@ -1,0 +1,42 @@
+.Xil/*
+*.swp
+*.zip
+
+# Vivado project files
+*.data/
+*.cache/
+*.hw/
+*.runs/
+*.sim/
+*.ip_user_files/
+*.gen/
+*.log
+*.jou
+*.str
+*.wdb
+*.wcfg
+*.backup/
+*.dir/
+*.html
+*.xml
+*.bit
+*.bin
+*.mcs
+*.prm
+*.rpt
+*.dcp
+*.ltx
+*.vcd
+*.vci
+*.vco
+
+# Xilinx IP related
+ip/
+bd/
+
+# Vitis related
+.metadata/
+build/
+debug/
+release/
+export/
