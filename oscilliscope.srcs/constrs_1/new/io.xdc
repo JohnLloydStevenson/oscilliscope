@@ -38,3 +38,8 @@ set_property PACKAGE_PIN U7 [get_ports {LCD_Data[3]}]
 set_property PACKAGE_PIN W7 [get_ports {LCD_Data[2]}]
 set_property PACKAGE_PIN U8 [get_ports {LCD_Data[1]}]
 set_property PACKAGE_PIN V8 [get_ports {LCD_Data[0]}]
+set_property -dict {PACKAGE_PIN L17 IOSTANDARD LVCMOS33} [get_ports sysclk]
+create_clock -period 83.330 -name sys_clk_pin -waveform {0.000 41.660} -add [get_ports sysclk]
+
+set_property IOSTANDARD LVCMOS33 [get_ports reset]
+set_property PACKAGE_PIN M3 [get_ports reset]

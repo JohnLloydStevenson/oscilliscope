@@ -1,0 +1,10 @@
+Display Command Set Write, no parameter:
+- 0x00 => NOP
+- 0x01 => SW reset
+- 0x28 => Display off
+- 0x29 => Display on
+
+Display Command Set Write, 1 parameter:
+- 0x2C => Memory Write (writes 1 subpixel)
+- 0x36 => Memory Access Control
+- 0x3C => Memory Write Continue (writes 1 subpixel)
