@@ -8,3 +8,27 @@ Display Command Set Write, 1 parameter:
 - 0x2C => Memory Write (writes 1 subpixel)
 - 0x36 => Memory Access Control
 - 0x3C => Memory Write Continue (writes 1 subpixel)
+
+
+Screen test:
+RST = 0   for 10–20 ms
+RST = 1   for 120 ms
+
+0x01                ; SWRESET
+(wait 10 ms)
+
+0x11                ; SLPOUT
+(wait 120 ms)
+
+0x3A, 0x55          ; COLMOD = 16-bit RGB565
+
+0x36, 0x48          ; MADCTL (orientation)
+
+0x29                ; DISPON
+(wait 20 ms)
+
+0x2A, x0H,x0L,x1H,x1L   ; set column range
+0x2B, y0H,y0L,y1H,y1L   ; set row range
+0x2C                   ; start memory write
+(pixel stream...)
+
