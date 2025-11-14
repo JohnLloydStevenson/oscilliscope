@@ -47,19 +47,14 @@ module scope(
 	localparam CMD_NOP = 16'h00;
 	localparam CMD_SWRESET = 16'h01;
 	localparam CMD_SLPOUT = 16'h11;
-	localparam CMD_COLMOD = 16'h3a;
-	localparam CMD_MADCTL = 16'h36;
+	localparam CMD_COLMOD = {16'h55, 16'h3a};	//16-bit RGB565
+	localparam CMD_MADCTL = {16'h48, 16'h36};	//RGB order
 	localparam CMD_DISPON = 16'h29;
-	localparam CMD_SETCOL = 16'h2a;
-	localparam CMD_SETROW = 16'h2b;
+	localparam CMD_SETCOL = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2a};	//0-480
+	localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
 	localparam CMD_MEMWRITE = 16'h2c;
 
-	localparam DATA_COLMOD = 16'h55;	//16-bit RGB565
-	localparam DATA_MADCTL = 16'h48;	//for RGB order
-	localparam [63:0] DATA_SETCOL = {16'h0, 16'h0, 16'h1, 16'he0};	//0-480
-	localparam [63:0] DATA_SETROW = {16'h0, 16'h0, 16'h1, 16'h40};	//0-320
-
-	localparam PIXEL_COUNT = 480*320;
+	localparam PIXEL_COUNT = 480*320*2;
 
 
 	//clocks
@@ -75,20 +70,13 @@ module scope(
 	//mealy msf state register
 	reg [3:0] state;
 	reg [3:0] next_state;
-	reg [18:0] boot_counter;
-	reg [15:0] swreset_counter;
-	reg [18:0] slpout_counter;
-	reg [15:0] dispon_counter;
-	reg [17:0] data_counter;
 	reg [20:0] state_counter;	//1 counter to rule them all
+	reg [15:0] data_counter;
 	initial begin
 		state = BOOT;
 		next_state = BOOT;
-		boot_counter = 19'b0;
-		swreset_counter = 16'b0;
-		slpout_counter = 19'b0;
-		data_counter = 18'b0;
 		state_counter = 21'b0;
+		data_counter = 16'b0;
 	end
 
 
@@ -97,33 +85,67 @@ module scope(
 		if (reset)
 			state <= RESET;
 		else
-			state <= next_state;
+			state <= next_state;	//update state
+
+		//substate counters
+		if (state == next_state)
+			state_counter <= state_counter + 1;	//count how long we've been on this step
+		else
+			state_counter <= 0;
+
+		if (state == NOP)
+			data_counter <= data_counter + 1;
 	end
 
 	//msf combinational block
 	always @(*) begin
 		case (state)
 			BOOT:
-				if (boot_counter == {17{1'b1}})
+				if (state_counter == {17{1'b1}})
 					next_state = SWRESET;
 				else
 					next_state = BOOT;
 			SWRESET:
-				if (swreset_counter == {14{1'b1}})
+				if (state_counter == {14{1'b1}})
 					next_state = SLPOUT;
 				else
 					next_state = SWRESET;
 			SLPOUT:
-				if (slpout_counter == {17{1'b1}})
-					next_state = IDLE;
+				if (state_counter == {17{1'b1}})
+					next_state = COLMOD;
 				else
 					next_state = SLPOUT;
+			COLMOD:
+				if (state_counter == 2)
+					next_state = MADCTL;
+				else
+					next_state = COLMOD;
+			MADCTL:
+				if (state_counter == 2)
+					next_state = DISPON;
+				else
+					next_state = MADCTL;
+			DISPON:
+				if (state_counter == {14{1'b1}})
+					next_state = SETCOL;
+				else
+					next_state = DISPON;
+			SETCOL:
+				if (state_counter == 5)
+					next_state = SETROW;
+				else
+					next_state = SETCOL;
+			SETROW:
+				if (state_counter == 5)
+					next_state = IDLE;
+				else
+					next_state = SETROW;
 			IDLE:
 				next_state = CMD;
 			CMD:
 				next_state = DATA;
 			DATA:
-				if (data_counter < PIXEL_COUNT)
+				if (state_counter < PIXEL_COUNT)
 					next_state = DATA;
 				else
 					next_state = NOP;
@@ -137,45 +159,27 @@ module scope(
 	end
 
 
-	//substate counters
-	always @(posedge lcd_clk) begin
-		if (state == BOOT)
-			boot_counter <= boot_counter + 1;
-	end
-
-	always @(posedge lcd_clk) begin
-		if (state == DATA)
-			data_counter <= data_counter + 1;
-		else
-			data_counter <= 0;
-	end
-
-	always @(posedge lcd_clk) begin
-		if (state == SWRESET)
-			swreset_counter <= swreset_counter + 1;
-		else
-			swreset_counter <= 0;
-	end
-
-	always @(posedge lcd_clk) begin
-		if (state == SLPOUT)
-			slpout_counter <= slpout_counter + 1;
-		else
-			slpout_counter <= 0;
-	end
-
-
 	//lcd signals
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_CS = swreset_counter < 2 ? 0 : 1;
+				LCD_CS = state_counter < 2 ? 0 : 1;
 			SLPOUT:
-				LCD_CS = slpout_counter < 2 ? 0 : 1;
+				LCD_CS = state_counter < 2 ? 0 : 1;
+			COLMOD:
+				LCD_CS = 0;
+			MADCTL:
+				LCD_CS = 0;
+			DISPON:
+				LCD_CS = state_counter < 2 ? 0 : 1;
+			SETCOL:
+				LCD_CS = 0;
+			SETROW:
+				LCD_CS = 0;
 			CMD:
 				LCD_CS = 0;
 			DATA:
-				LCD_CS = data_counter < PIXEL_COUNT ? 0 : 1;
+				LCD_CS = 0;
 			default:
 				LCD_CS = 1;
 		endcase
@@ -209,15 +213,15 @@ module scope(
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_WRX = swreset_counter < 1 ? !lcd_clk : 1;
+				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
 			SLPOUT:
-				LCD_WRX = slpout_counter < 1 ? !lcd_clk : 1;
+				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
 			COLMOD:
 				LCD_WRX = !lcd_clk;
 			MADCTL:
 				LCD_WRX = !lcd_clk;
 			DISPON:
-				LCD_WRX = dispon_counter < 1 ? !lcd_clk : 1;
+				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
 			SETCOL:
 				LCD_WRX = !lcd_clk;
 			SETROW:
@@ -233,7 +237,7 @@ module scope(
 		endcase
 	end
 
-	assign LCD_RST = !(state == BOOT && boot_counter < 19'b100000000000000);
+	assign LCD_RST = !(state == BOOT && state_counter < 19'b100000000000000);
 
 	always @(*) begin
 		case (state)
@@ -241,10 +245,20 @@ module scope(
 				LCD_Data = CMD_SWRESET;
 			SLPOUT:
 				LCD_Data = CMD_SLPOUT;
+			COLMOD:
+				LCD_Data = CMD_COLMOD[16*state_counter[1:0] -: 16];
+			MADCTL:
+				LCD_Data = CMD_MADCTL[16*state_counter[1:0] -: 16];
+			DISPON:
+				LCD_Data = CMD_DISPON;
+			SETCOL:
+				LCD_Data = CMD_SETCOL[16*state_counter[1:0] -: 16];
+			SETROW:
+				LCD_Data = CMD_SETROW[16*state_counter[1:0] -: 16];
 			CMD:
 				LCD_Data = CMD_MEMWRITE;
 			DATA:
-				LCD_Data = data_counter[17:1];
+				LCD_Data = (state_counter % 20) < 10 ? data_counter[15:0] : 16'b0;
 			NOP:
 				LCD_Data = CMD_NOP;
 			default:
