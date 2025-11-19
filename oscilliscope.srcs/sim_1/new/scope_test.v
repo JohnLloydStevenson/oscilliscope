@@ -34,10 +34,19 @@ reg reset;
 
 	wire [3:0] state;
 	assign state = tb.my_scope.state;
+
 	wire [20:0] counter;
-	assign counter = tb.my_scope.data_counter;
+	assign counter = tb.my_scope.data_cursor;
+
 	wire clk;
 	assign clk = tb.my_scope.lcd_clk;
 
+	wire [8:0] x,y;
+	assign x = tb.my_scope.x;
+	assign y = tb.my_scope.y;
+
+
+	//run simulation for 600ms
+	initial #600000000;
 endmodule
 

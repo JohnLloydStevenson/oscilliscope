@@ -54,7 +54,7 @@ module scope(
 	localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
 	localparam CMD_MEMWRITE = 16'h2c;
 
-	localparam PIXEL_COUNT = 480*320*2;
+	localparam PIXEL_COUNT = 480*320;
 
 
 	//clocks
@@ -71,13 +71,20 @@ module scope(
 	reg [3:0] state;
 	reg [3:0] next_state;
 	reg [20:0] state_counter;	//1 counter to rule them all
-	reg [15:0] data_counter;
+	reg [18:0] data_cursor;
+	reg [7:0] adc_data;
 	initial begin
 		state = BOOT;
 		next_state = BOOT;
 		state_counter = 21'b0;
-		data_counter = 16'b0;
+		data_cursor = 19'b0;
+		adc_data = 8'b0;
 	end
+
+	//define x and y
+	wire [8:0] x,y;
+	assign x = (data_cursor/3) / 9'd320;
+	assign y = (data_cursor) % 9'd320;
 
 
 	//msf sequential block
@@ -93,8 +100,15 @@ module scope(
 		else
 			state_counter <= 0;
 
-		if (state == NOP)
-			data_counter <= data_counter + 1;
+		//scan through the lcd data
+		if (state == DATA)
+			data_cursor <= data_cursor + 1;
+		else
+			data_cursor <= 16'b0;
+
+		//increment dummy ADC data
+		if (state == IDLE)
+			adc_data <= adc_data - 1;
 	end
 
 	//msf combinational block
@@ -116,12 +130,12 @@ module scope(
 				else
 					next_state = SLPOUT;
 			COLMOD:
-				if (state_counter == 2)
+				if (state_counter == 1)
 					next_state = MADCTL;
 				else
 					next_state = COLMOD;
 			MADCTL:
-				if (state_counter == 2)
+				if (state_counter == 1)
 					next_state = DISPON;
 				else
 					next_state = MADCTL;
@@ -131,12 +145,12 @@ module scope(
 				else
 					next_state = DISPON;
 			SETCOL:
-				if (state_counter == 5)
+				if (state_counter == 4)
 					next_state = SETROW;
 				else
 					next_state = SETCOL;
 			SETROW:
-				if (state_counter == 5)
+				if (state_counter == 4)
 					next_state = IDLE;
 				else
 					next_state = SETROW;
@@ -145,7 +159,7 @@ module scope(
 			CMD:
 				next_state = DATA;
 			DATA:
-				if (state_counter < PIXEL_COUNT)
+				if (state_counter < PIXEL_COUNT-1)
 					next_state = DATA;
 				else
 					next_state = NOP;
@@ -246,19 +260,19 @@ module scope(
 			SLPOUT:
 				LCD_Data = CMD_SLPOUT;
 			COLMOD:
-				LCD_Data = CMD_COLMOD[16*state_counter[1:0] -: 16];
+				LCD_Data = CMD_COLMOD[16*state_counter[1:0] +: 16];
 			MADCTL:
-				LCD_Data = CMD_MADCTL[16*state_counter[1:0] -: 16];
+				LCD_Data = CMD_MADCTL[16*state_counter[1:0] +: 16];
 			DISPON:
 				LCD_Data = CMD_DISPON;
 			SETCOL:
-				LCD_Data = CMD_SETCOL[16*state_counter[1:0] -: 16];
+				LCD_Data = CMD_SETCOL[16*state_counter[1:0] +: 16];
 			SETROW:
-				LCD_Data = CMD_SETROW[16*state_counter[1:0] -: 16];
+				LCD_Data = CMD_SETROW[16*state_counter[1:0] +: 16];
 			CMD:
 				LCD_Data = CMD_MEMWRITE;
 			DATA:
-				LCD_Data = (state_counter % 20) < 10 ? data_counter[15:0] : 16'b0;
+				LCD_Data = x < adc_data ? 16'hff : 16'b0;
 			NOP:
 				LCD_Data = CMD_NOP;
 			default:
