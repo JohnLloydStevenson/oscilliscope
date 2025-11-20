@@ -23,16 +23,16 @@ module scope(
 	input sysclk,
 	input reset,
 
-    output LCD_CS,
-    output LCD_RST,
-    output LCD_DCX,	//1 => data/cmd params, 0 => cmd
-    output LCD_WRX,
-    output [15:0] LCD_Data,
+    output LCD_cs,
+    output LCD_rst,
+    output LCD_dcx,	//1 => data/cmd params, 0 => cmd
+    output LCD_wrx,
+    output [15:0] LCD_data,
 
-	output ADC_CS,
+	output ADC_cs,
 	output ADC_clk,
-	output ADC_DO,
-	input ADC_DI,
+	input ADC_do,
+	output ADC_di
     );
 	//clocks
 	reg [8:0] clk;
@@ -48,24 +48,36 @@ module scope(
 
 	lcd_screen lcd (.clk(lcd_clk),
 					.reset(reset),
-					.CS(LCD_CS),
-					.RST(LCD_RST),
-					.DCX(LCD_DCX),
-					.WRX(LCD_WRX),
-					.Data(LCD_Data),
+					.cs(LCD_cs),
+					.rst(LCD_rst),
+					.dcx(LCD_dcx),
+					.wrx(LCD_wrx),
+					.Data(LCD_data),
 					.x(x)
 	);
 
+endmodule
+
+module adc_0832ccn(
+	output clk,
+	output cs,
+	output DI,
+	input do,
+
+	//internal connections
+	input [8:0] x,
+	output [7:0] data
+	);
 endmodule
 
 module lcd_screen(
 	input clk,
 	input reset,
 
-    output reg CS,
-    output RST,
-    output reg DCX,	//1 => data/cmd params, 0 => cmd
-    output reg WRX,
+    output reg cs,
+    output rst,
+    output reg dcx,	//1 => data/cmd params, 0 => cmd
+    output reg wrx,
     output reg [15:0] Data,
 
 	output [8:0] x
@@ -209,81 +221,81 @@ module lcd_screen(
 	always @(*) begin
 		case (state)
 			SWRESET:
-				CS = state_counter < 2 ? 0 : 1;
+				cs = state_counter < 2 ? 0 : 1;
 			SLPOUT:
-				CS = state_counter < 2 ? 0 : 1;
+				cs = state_counter < 2 ? 0 : 1;
 			COLMOD:
-				CS = 0;
+				cs = 0;
 			MADCTL:
-				CS = 0;
+				cs = 0;
 			DISPON:
-				CS = state_counter < 2 ? 0 : 1;
+				cs = state_counter < 2 ? 0 : 1;
 			SETCOL:
-				CS = 0;
+				cs = 0;
 			SETROW:
-				CS = 0;
+				cs = 0;
 			CMD:
-				CS = 0;
+				cs = 0;
 			DATA:
-				CS = 0;
+				cs = 0;
 			default:
-				CS = 1;
+				cs = 1;
 		endcase
 	end
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				DCX = 0;
+				dcx = 0;
 			SLPOUT:
-				DCX = 0;
+				dcx = 0;
 			COLMOD:
-				DCX = 0;
+				dcx = 0;
 			MADCTL:
-				DCX = 0;
+				dcx = 0;
 			DISPON:
-				DCX = 0;
+				dcx = 0;
 			SETCOL:
-				DCX = 0;
+				dcx = 0;
 			SETROW:
-				DCX = 0;
+				dcx = 0;
 			CMD:
-				DCX = 0;
+				dcx = 0;
 			NOP:
-				DCX = 0;
+				dcx = 0;
 			default:
-				DCX = 1;
+				dcx = 1;
 		endcase
 	end
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				WRX = state_counter < 1 ? !clk : 1;
+				wrx = state_counter < 1 ? !clk : 1;
 			SLPOUT:
-				WRX = state_counter < 1 ? !clk : 1;
+				wrx = state_counter < 1 ? !clk : 1;
 			COLMOD:
-				WRX = !clk;
+				wrx = !clk;
 			MADCTL:
-				WRX = !clk;
+				wrx = !clk;
 			DISPON:
-				WRX = state_counter < 1 ? !clk : 1;
+				wrx = state_counter < 1 ? !clk : 1;
 			SETCOL:
-				WRX = !clk;
+				wrx = !clk;
 			SETROW:
-				WRX = !clk;
+				wrx = !clk;
 			CMD:
-				WRX = !clk;
+				wrx = !clk;
 			DATA:
-				WRX = !clk;
+				wrx = !clk;
 			NOP:
-				WRX = !clk;
+				wrx = !clk;
 			default:
-				WRX = 1;
+				wrx = 1;
 		endcase
 	end
 
-	assign RST = !(state == BOOT && state_counter < 19'b100000000000000);
+	assign rst = !(state == BOOT && state_counter < 19'b100000000000000);
 
 	always @(*) begin
 		case (state)
