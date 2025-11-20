@@ -23,11 +23,53 @@ module scope(
 	input sysclk,
 	input reset,
 
-    output reg LCD_CS,
+    output LCD_CS,
     output LCD_RST,
-    output reg LCD_DCX,	//1 => data/cmd params, 0 => cmd
-    output reg LCD_WRX,
-    output reg [15:0] LCD_Data
+    output LCD_DCX,	//1 => data/cmd params, 0 => cmd
+    output LCD_WRX,
+    output [15:0] LCD_Data,
+
+	output ADC_CS,
+	output ADC_clk,
+	output ADC_DO,
+	input ADC_DI,
+    );
+	//clocks
+	reg [8:0] clk;
+	initial clk = 0;
+	always @(posedge sysclk) begin
+		clk <= clk+1;
+	end
+	wire lcd_clk;
+	assign lcd_clk = clk[3];
+
+	//inter-module signals
+	wire [8:0] x;
+
+	lcd_screen lcd (.clk(lcd_clk),
+					.reset(reset),
+					.CS(LCD_CS),
+					.RST(LCD_RST),
+					.DCX(LCD_DCX),
+					.WRX(LCD_WRX),
+					.Data(LCD_Data),
+					.x(x)
+	);
+
+endmodule
+
+module lcd_screen(
+	input clk,
+	input reset,
+
+    output reg CS,
+    output RST,
+    output reg DCX,	//1 => data/cmd params, 0 => cmd
+    output reg WRX,
+    output reg [15:0] Data,
+
+	output [8:0] x
+	//input [7:0] adc_data
     );
 	//local parameters
 	localparam BOOT = 0;
@@ -57,16 +99,6 @@ module scope(
 	localparam PIXEL_COUNT = 480*320;
 
 
-	//clocks
-	reg [8:0] clk;
-	initial clk = 0;
-	always @(posedge sysclk) begin
-		clk <= clk+1;
-	end
-	wire lcd_clk;
-	assign lcd_clk = clk[3];
-
-
 	//mealy msf state register
 	reg [3:0] state;
 	reg [3:0] next_state;
@@ -82,13 +114,13 @@ module scope(
 	end
 
 	//define x and y
-	wire [8:0] x,y;
+	wire [8:0] y;
 	assign x = (data_cursor/3) / 9'd320;
 	assign y = (data_cursor) % 9'd320;
 
 
 	//msf sequential block
-	always @(posedge lcd_clk) begin
+	always @(posedge clk) begin
 		if (reset)
 			state <= RESET;
 		else
@@ -177,106 +209,106 @@ module scope(
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_CS = state_counter < 2 ? 0 : 1;
+				CS = state_counter < 2 ? 0 : 1;
 			SLPOUT:
-				LCD_CS = state_counter < 2 ? 0 : 1;
+				CS = state_counter < 2 ? 0 : 1;
 			COLMOD:
-				LCD_CS = 0;
+				CS = 0;
 			MADCTL:
-				LCD_CS = 0;
+				CS = 0;
 			DISPON:
-				LCD_CS = state_counter < 2 ? 0 : 1;
+				CS = state_counter < 2 ? 0 : 1;
 			SETCOL:
-				LCD_CS = 0;
+				CS = 0;
 			SETROW:
-				LCD_CS = 0;
+				CS = 0;
 			CMD:
-				LCD_CS = 0;
+				CS = 0;
 			DATA:
-				LCD_CS = 0;
+				CS = 0;
 			default:
-				LCD_CS = 1;
+				CS = 1;
 		endcase
 	end
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_DCX = 0;
+				DCX = 0;
 			SLPOUT:
-				LCD_DCX = 0;
+				DCX = 0;
 			COLMOD:
-				LCD_DCX = 0;
+				DCX = 0;
 			MADCTL:
-				LCD_DCX = 0;
+				DCX = 0;
 			DISPON:
-				LCD_DCX = 0;
+				DCX = 0;
 			SETCOL:
-				LCD_DCX = 0;
+				DCX = 0;
 			SETROW:
-				LCD_DCX = 0;
+				DCX = 0;
 			CMD:
-				LCD_DCX = 0;
+				DCX = 0;
 			NOP:
-				LCD_DCX = 0;
+				DCX = 0;
 			default:
-				LCD_DCX = 1;
+				DCX = 1;
 		endcase
 	end
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
+				WRX = state_counter < 1 ? !clk : 1;
 			SLPOUT:
-				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
+				WRX = state_counter < 1 ? !clk : 1;
 			COLMOD:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			MADCTL:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			DISPON:
-				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
+				WRX = state_counter < 1 ? !clk : 1;
 			SETCOL:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			SETROW:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			CMD:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			DATA:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			NOP:
-				LCD_WRX = !lcd_clk;
+				WRX = !clk;
 			default:
-				LCD_WRX = 1;
+				WRX = 1;
 		endcase
 	end
 
-	assign LCD_RST = !(state == BOOT && state_counter < 19'b100000000000000);
+	assign RST = !(state == BOOT && state_counter < 19'b100000000000000);
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_Data = CMD_SWRESET;
+				Data = CMD_SWRESET;
 			SLPOUT:
-				LCD_Data = CMD_SLPOUT;
+				Data = CMD_SLPOUT;
 			COLMOD:
-				LCD_Data = CMD_COLMOD[16*state_counter[1:0] +: 16];
+				Data = CMD_COLMOD[16*state_counter[1:0] +: 16];
 			MADCTL:
-				LCD_Data = CMD_MADCTL[16*state_counter[1:0] +: 16];
+				Data = CMD_MADCTL[16*state_counter[1:0] +: 16];
 			DISPON:
-				LCD_Data = CMD_DISPON;
+				Data = CMD_DISPON;
 			SETCOL:
-				LCD_Data = CMD_SETCOL[16*state_counter[1:0] +: 16];
+				Data = CMD_SETCOL[16*state_counter[1:0] +: 16];
 			SETROW:
-				LCD_Data = CMD_SETROW[16*state_counter[1:0] +: 16];
+				Data = CMD_SETROW[16*state_counter[1:0] +: 16];
 			CMD:
-				LCD_Data = CMD_MEMWRITE;
+				Data = CMD_MEMWRITE;
 			DATA:
-				LCD_Data = x < adc_data ? 16'hff : 16'b0;
+				Data = x < adc_data ? 16'hff : 16'b0;
 			NOP:
-				LCD_Data = CMD_NOP;
+				Data = CMD_NOP;
 			default:
-				LCD_Data = CMD_NOP;
+				Data = CMD_NOP;
 		endcase
 	end
 
