@@ -31,20 +31,47 @@ module scope(
 
 	output ADC_cs,
 	output ADC_clk,
-	input ADC_do,
-	output ADC_di
+	output ADC_dout,
+	input ADC_din
     );
 	//clocks
-	reg [8:0] clk;
+	reg [11:0] clk;
 	initial clk = 0;
 	always @(posedge sysclk) begin
 		clk <= clk+1;
 	end
-	wire lcd_clk;
+	wire lcd_clk, adc_clk;
 	assign lcd_clk = clk[3];
+	assign adc_clk = clk[9];
 
 	//inter-module signals
 	wire [8:0] x;
+	wire [7:0] adc_data;
+	reg [7:0] adc_data_buff1, adc_data_buff2;
+	always @(posedge lcd_clk) begin
+		adc_data_buff1 <= adc_data;
+		adc_data_buff2 <= adc_data_buff1;
+	end
+
+	//Async FIFO for CDC
+	/*
+	fifo_generator_0 fifo ( .rst(),
+							.wr_clk(),
+							.rd_clk(),
+							.din(),
+							.dout(),
+							.wr_en(),
+							.rd_en()
+	);
+	*/
+
+	adc_0832ccn adc (.sysclk(adc_clk),
+					 .clk(ADC_clk),
+					 .cs(ADC_cs),
+					 .din(ADC_din),
+					 .dout(ADC_dout),
+					 .data(adc_data)
+	);
 
 	lcd_screen lcd (.clk(lcd_clk),
 					.reset(reset),
@@ -53,21 +80,74 @@ module scope(
 					.dcx(LCD_dcx),
 					.wrx(LCD_wrx),
 					.Data(LCD_data),
-					.x(x)
+					.x(x),
+					.adc_data(adc_data_buff2)
 	);
 
 endmodule
 
 module adc_0832ccn(
+	input sysclk,
 	output clk,
-	output cs,
-	output DI,
-	input do,
+	output cs,	//active low
+	input din,
+	output dout,
 
 	//internal connections
-	input [8:0] x,
-	output [7:0] data
+	output reg [7:0] data
 	);
+
+	localparam IDLE = 2'd0;
+	localparam START = 2'd1;
+	localparam READ = 2'd2;
+	localparam RESET = 2'd3;
+
+	reg [1:0] state, next_state;
+	reg [2:0] state_counter;
+	initial state = IDLE;
+	initial state_counter = 3'b0;
+
+	always @(posedge sysclk) begin
+		state <= next_state;
+
+		if (state == next_state)
+			state_counter = state_counter+1;
+		else
+			state_counter = 0;
+	end
+
+	//state transition logic
+	always @(*) begin
+		case (state)
+			IDLE:
+				next_state = START;
+			START:
+				next_state = state_counter < 4-1 ? START : READ;	//3 bits plus one waiting cycle
+			READ:
+				next_state = state_counter < 8-1 ? READ : RESET;
+			RESET:
+				next_state = state_counter < 1-1 ? RESET : IDLE;
+		endcase
+	end
+
+	reg mux;
+	initial mux = 1'b0;
+	wire [3:0] cmd_start = {1'b0, mux, 1'b1, 1'b1};	//dummy bit, mux address, single-ended mode, start bit
+
+	assign cs = state == IDLE;
+	assign clk = state != IDLE ? !sysclk : 1'b0;
+	assign dout = state == START ? cmd_start[state_counter] : 1'b0;
+
+	//sequential logic for storing bits
+	reg [7:0] data_buff;
+	always @(posedge clk) begin
+		if (state == READ)
+			data_buff[state_counter] <= din;
+
+		if (state == RESET)
+			data <= data_buff;
+	end
+
 endmodule
 
 module lcd_screen(
@@ -80,8 +160,8 @@ module lcd_screen(
     output reg wrx,
     output reg [15:0] Data,
 
-	output [8:0] x
-	//input [7:0] adc_data
+	output [8:0] x,
+	input [7:0] adc_data
     );
 	//local parameters
 	localparam BOOT = 0;
@@ -116,13 +196,11 @@ module lcd_screen(
 	reg [3:0] next_state;
 	reg [20:0] state_counter;	//1 counter to rule them all
 	reg [18:0] data_cursor;
-	reg [7:0] adc_data;
 	initial begin
 		state = BOOT;
 		next_state = BOOT;
 		state_counter = 21'b0;
 		data_cursor = 19'b0;
-		adc_data = 8'b0;
 	end
 
 	//define x and y
@@ -149,10 +227,6 @@ module lcd_screen(
 			data_cursor <= data_cursor + 1;
 		else
 			data_cursor <= 16'b0;
-
-		//increment dummy ADC data
-		if (state == IDLE)
-			adc_data <= adc_data - 1;
 	end
 
 	//msf combinational block

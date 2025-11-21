@@ -12,11 +12,11 @@ reg reset;
 	scope my_scope (
 			.sysclk(sysclk),
 			.reset(reset),
-			.LCD_CS(CS),
-			.LCD_RST(RST),
-			.LCD_DCX(DCX),
-			.LCD_WRX(WRX),
-			.LCD_Data(Data)
+			.LCD_cs(CS),
+			.LCD_rst(RST),
+			.LCD_dcx(DCX),
+			.LCD_wrx(WRX),
+			.LCD_data(Data)
 			);
 
 	// Clock generator (for reference)
@@ -32,21 +32,35 @@ reg reset;
 		// stay low forever
 	end
 
-	wire [3:0] state;
-	assign state = tb.my_scope.state;
+	//wire [3:0] state;
+	//assign state = tb.my_scope.lcd.state;
 
-	wire [20:0] counter;
-	assign counter = tb.my_scope.data_cursor;
+	//wire [20:0] counter;
+	//assign counter = tb.my_scope.lcd.data_cursor;
 
-	wire clk;
-	assign clk = tb.my_scope.lcd_clk;
+	//wire clk;
+	//assign clk = tb.my_scope.lcd_clk;
 
-	wire [8:0] x,y;
-	assign x = tb.my_scope.x;
-	assign y = tb.my_scope.y;
+	//wire [8:0] x,y;
+	//assign x = tb.my_scope.lcd.x;
+	//assign y = tb.my_scope.lcd.y;
 
 
-	//run simulation for 600ms
-	initial #600000000;
+	wire clk, cs, dout, din, data;
+	adc_0832ccn adc (.sysclk(sysclk),
+					 .clk(clk),
+					 .cs(cs),
+					 .din(din),
+					 .dout(dout),
+					 .data(data)
+			);
+
+	wire [1:0] state;
+	wire [2:0] state_counter;
+	assign state = tb.adc.state;
+	assign state_counter = tb.adc.state_counter;
+
+	wire adc_clk;
+	assign adc_clk = tb.my_scope.adc_clk;
 endmodule
 
