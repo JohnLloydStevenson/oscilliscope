@@ -390,7 +390,7 @@ module lcd_screen(
 			CMD:
 				Data = CMD_MEMWRITE;
 			DATA:
-				Data = x < adc_data ? 16'hff : 16'b0;
+				Data = x < {adc_data, 1'b0} ? 16'hff : 16'b0;
 			NOP:
 				Data = CMD_NOP;
 			default:
