@@ -23,11 +23,145 @@ module scope(
 	input sysclk,
 	input reset,
 
-    output reg LCD_CS,
-    output LCD_RST,
-    output reg LCD_DCX,	//1 => data/cmd params, 0 => cmd
-    output reg LCD_WRX,
-    output reg [15:0] LCD_Data
+    output LCD_cs,
+    output LCD_rst,
+    output LCD_dcx,	//1 => data/cmd params, 0 => cmd
+    output LCD_wrx,
+    output [15:0] LCD_data,
+
+	output ADC_cs,
+	output ADC_clk,
+	output ADC_dout,
+	input ADC_din
+    );
+	//clocks
+	reg [11:0] clk;
+	initial clk = 0;
+	always @(posedge sysclk) begin
+		clk <= clk+1;
+	end
+	wire lcd_clk, adc_clk;
+	assign lcd_clk = clk[3];
+	assign adc_clk = clk[9];
+
+	//inter-module signals
+	wire [8:0] x;
+	wire [7:0] adc_data;
+	reg [7:0] adc_data_buff1, adc_data_buff2;
+	always @(posedge lcd_clk) begin
+		adc_data_buff1 <= adc_data;
+		adc_data_buff2 <= adc_data_buff1;
+	end
+
+	//Async FIFO for CDC
+	/*
+	fifo_generator_0 fifo ( .rst(),
+							.wr_clk(),
+							.rd_clk(),
+							.din(),
+							.dout(),
+							.wr_en(),
+							.rd_en()
+	);
+	*/
+
+	adc_0832ccn adc (.sysclk(adc_clk),
+					 .clk(ADC_clk),
+					 .cs(ADC_cs),
+					 .din(ADC_din),
+					 .dout(ADC_dout),
+					 .data(adc_data)
+	);
+
+	lcd_screen lcd (.clk(lcd_clk),
+					.reset(reset),
+					.cs(LCD_cs),
+					.rst(LCD_rst),
+					.dcx(LCD_dcx),
+					.wrx(LCD_wrx),
+					.Data(LCD_data),
+					.x(x),
+					.adc_data(adc_data_buff2)
+	);
+
+endmodule
+
+module adc_0832ccn(
+	input sysclk,
+	output clk,
+	output cs,	//active low
+	input din,
+	output dout,
+
+	//internal connections
+	output reg [7:0] data
+	);
+
+	localparam IDLE = 2'd0;
+	localparam START = 2'd1;
+	localparam READ = 2'd2;
+	localparam RESET = 2'd3;
+
+	reg [1:0] state, next_state;
+	reg [2:0] state_counter;
+	initial state = IDLE;
+	initial state_counter = 3'b0;
+
+	always @(posedge sysclk) begin
+		state <= next_state;
+
+		if (state == next_state)
+			state_counter = state_counter+1;
+		else
+			state_counter = 0;
+	end
+
+	//state transition logic
+	always @(*) begin
+		case (state)
+			IDLE:
+				next_state = START;
+			START:
+				next_state = state_counter < 4-1 ? START : READ;	//3 bits plus one waiting cycle
+			READ:
+				next_state = state_counter < 8-1 ? READ : RESET;
+			RESET:
+				next_state = state_counter < 1-1 ? RESET : IDLE;
+		endcase
+	end
+
+	reg mux;
+	initial mux = 1'b0;
+	wire [3:0] cmd_start = {1'b0, mux, 1'b1, 1'b1};	//dummy bit, mux address, single-ended mode, start bit
+
+	assign cs = state == IDLE;
+	assign clk = state != IDLE ? !sysclk : 1'b0;
+	assign dout = state == START ? cmd_start[state_counter] : 1'b0;
+
+	//sequential logic for storing bits
+	reg [7:0] data_buff;
+	always @(posedge clk) begin
+		if (state == READ)
+			data_buff[state_counter] <= din;
+
+		if (state == RESET)
+			data <= data_buff;
+	end
+
+endmodule
+
+module lcd_screen(
+	input clk,
+	input reset,
+
+    output reg cs,
+    output rst,
+    output reg dcx,	//1 => data/cmd params, 0 => cmd
+    output reg wrx,
+    output reg [15:0] Data,
+
+	output [8:0] x,
+	input [7:0] adc_data
     );
 	//local parameters
 	localparam BOOT = 0;
@@ -57,38 +191,26 @@ module scope(
 	localparam PIXEL_COUNT = 480*320;
 
 
-	//clocks
-	reg [8:0] clk;
-	initial clk = 0;
-	always @(posedge sysclk) begin
-		clk <= clk+1;
-	end
-	wire lcd_clk;
-	assign lcd_clk = clk[3];
-
-
 	//mealy msf state register
 	reg [3:0] state;
 	reg [3:0] next_state;
 	reg [20:0] state_counter;	//1 counter to rule them all
 	reg [18:0] data_cursor;
-	reg [7:0] adc_data;
 	initial begin
 		state = BOOT;
 		next_state = BOOT;
 		state_counter = 21'b0;
 		data_cursor = 19'b0;
-		adc_data = 8'b0;
 	end
 
 	//define x and y
-	wire [8:0] x,y;
+	wire [8:0] y;
 	assign x = (data_cursor/3) / 9'd320;
 	assign y = (data_cursor) % 9'd320;
 
 
 	//msf sequential block
-	always @(posedge lcd_clk) begin
+	always @(posedge clk) begin
 		if (reset)
 			state <= RESET;
 		else
@@ -105,10 +227,6 @@ module scope(
 			data_cursor <= data_cursor + 1;
 		else
 			data_cursor <= 16'b0;
-
-		//increment dummy ADC data
-		if (state == IDLE)
-			adc_data <= adc_data - 1;
 	end
 
 	//msf combinational block
@@ -177,106 +295,106 @@ module scope(
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_CS = state_counter < 2 ? 0 : 1;
+				cs = state_counter < 2 ? 0 : 1;
 			SLPOUT:
-				LCD_CS = state_counter < 2 ? 0 : 1;
+				cs = state_counter < 2 ? 0 : 1;
 			COLMOD:
-				LCD_CS = 0;
+				cs = 0;
 			MADCTL:
-				LCD_CS = 0;
+				cs = 0;
 			DISPON:
-				LCD_CS = state_counter < 2 ? 0 : 1;
+				cs = state_counter < 2 ? 0 : 1;
 			SETCOL:
-				LCD_CS = 0;
+				cs = 0;
 			SETROW:
-				LCD_CS = 0;
+				cs = 0;
 			CMD:
-				LCD_CS = 0;
+				cs = 0;
 			DATA:
-				LCD_CS = 0;
+				cs = 0;
 			default:
-				LCD_CS = 1;
+				cs = 1;
 		endcase
 	end
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_DCX = 0;
+				dcx = 0;
 			SLPOUT:
-				LCD_DCX = 0;
+				dcx = 0;
 			COLMOD:
-				LCD_DCX = 0;
+				dcx = 0;
 			MADCTL:
-				LCD_DCX = 0;
+				dcx = 0;
 			DISPON:
-				LCD_DCX = 0;
+				dcx = 0;
 			SETCOL:
-				LCD_DCX = 0;
+				dcx = 0;
 			SETROW:
-				LCD_DCX = 0;
+				dcx = 0;
 			CMD:
-				LCD_DCX = 0;
+				dcx = 0;
 			NOP:
-				LCD_DCX = 0;
+				dcx = 0;
 			default:
-				LCD_DCX = 1;
+				dcx = 1;
 		endcase
 	end
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
+				wrx = state_counter < 1 ? !clk : 1;
 			SLPOUT:
-				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
+				wrx = state_counter < 1 ? !clk : 1;
 			COLMOD:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			MADCTL:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			DISPON:
-				LCD_WRX = state_counter < 1 ? !lcd_clk : 1;
+				wrx = state_counter < 1 ? !clk : 1;
 			SETCOL:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			SETROW:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			CMD:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			DATA:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			NOP:
-				LCD_WRX = !lcd_clk;
+				wrx = !clk;
 			default:
-				LCD_WRX = 1;
+				wrx = 1;
 		endcase
 	end
 
-	assign LCD_RST = !(state == BOOT && state_counter < 19'b100000000000000);
+	assign rst = !(state == BOOT && state_counter < 19'b100000000000000);
 
 	always @(*) begin
 		case (state)
 			SWRESET:
-				LCD_Data = CMD_SWRESET;
+				Data = CMD_SWRESET;
 			SLPOUT:
-				LCD_Data = CMD_SLPOUT;
+				Data = CMD_SLPOUT;
 			COLMOD:
-				LCD_Data = CMD_COLMOD[16*state_counter[1:0] +: 16];
+				Data = CMD_COLMOD[16*state_counter[1:0] +: 16];
 			MADCTL:
-				LCD_Data = CMD_MADCTL[16*state_counter[1:0] +: 16];
+				Data = CMD_MADCTL[16*state_counter[1:0] +: 16];
 			DISPON:
-				LCD_Data = CMD_DISPON;
+				Data = CMD_DISPON;
 			SETCOL:
-				LCD_Data = CMD_SETCOL[16*state_counter[1:0] +: 16];
+				Data = CMD_SETCOL[16*state_counter[1:0] +: 16];
 			SETROW:
-				LCD_Data = CMD_SETROW[16*state_counter[1:0] +: 16];
+				Data = CMD_SETROW[16*state_counter[1:0] +: 16];
 			CMD:
-				LCD_Data = CMD_MEMWRITE;
+				Data = CMD_MEMWRITE;
 			DATA:
-				LCD_Data = x < adc_data ? 16'hff : 16'b0;
+				Data = x < {adc_data, 1'b0} ? 16'hff : 16'b0;
 			NOP:
-				LCD_Data = CMD_NOP;
+				Data = CMD_NOP;
 			default:
-				LCD_Data = CMD_NOP;
+				Data = CMD_NOP;
 		endcase
 	end
 
