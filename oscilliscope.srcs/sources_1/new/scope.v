@@ -22,6 +22,9 @@
 module scope(
 	input sysclk,
 	input reset,
+	input enc_a,
+	input enc_b,
+	input enc_sw,
 
     output LCD_cs,
     output LCD_rst,
