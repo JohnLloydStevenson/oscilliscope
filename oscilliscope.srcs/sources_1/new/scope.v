@@ -63,7 +63,7 @@ module scope(
 	reg channel;
 	reg enc_a_buff1, enc_a_buff2, enc_b_buff1, enc_b_buff2, enc_sw_buff1, enc_sw_buff2;
 	wire a, b, sw;
-	initial pos = 8'd100;
+	initial pos = 8'd1;
 	initial channel = 1'b1;
 	always @(posedge enc_clk) begin
 		enc_a_buff1 <= enc_a;
@@ -76,7 +76,7 @@ module scope(
 	assign a = enc_a_buff1 && enc_a_buff2;
 	assign b = enc_b_buff1 && enc_b_buff2;
 	assign sw = !enc_sw_buff1 && enc_sw_buff2;
-	
+
 	//encoder increments adc_data register
 	always @(posedge b) begin
 		if (a)
@@ -224,12 +224,8 @@ module lcd_screen(
 	//localparam CMD_MADCTL = {16'h48, 16'h36};	//RGB order
 	localparam CMD_MADCTL = {16'h20, 16'h36};	//RGB order
 	localparam CMD_DISPON = 16'h29;
-	localparam CMD_SETCOL = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2a};	//0-160
-	//localparam CMD_SETCOL = {16'h13f, 16'h0, 16'h2a};	//0-319
-	localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-240
-	//localparam CMD_SETROW = {16'h1df, 16'h0, 16'h2b};	//0-479
-	//localparam CMD_SETROW = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
-	//localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
+	localparam CMD_SETCOL = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2a};	//0-479
+	localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-319
 	localparam CMD_MEMWRITE = 16'h2c;
 
 	localparam COLS = 9'd480;
@@ -448,15 +444,14 @@ module lcd_screen(
 			CMD:
 				Data = CMD_MEMWRITE;
 			DATA:
-				//Data = x < {adc_data, 1'b0} ? 16'hff : 16'b0;
-				if (x%20 == 0)
+				if (y == {adc_data, 1'b0})
+					Data = green ? 16'h00f8 : 16'h0;
+				else if (x%20 == 0)
 					Data = blue ? 16'h00f8 : 16'h0;
 				else if (y%10 == 0)
 					Data = blue ? 16'h00f8 : 16'h0;
-				else if (channel)
-					Data = x == {adc_data, 1'b0} ? (green ? 16'h00f8 : 16'h0) : 16'b0;
 				else
-					Data = y == {adc_data, 1'b0} ? (green ? 16'h00f8 : 16'h0) : 16'b0;
+					Data = 16'h0;
 			NOP:
 				Data = CMD_NOP;
 			default:
