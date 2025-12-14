@@ -37,6 +37,10 @@ module scope(
 	input ADC_dout,
 	output ADC_din
     );
+	localparam COLS = 9'd480;	//these params are duplicates between modules because global modules doesn't work :/
+	localparam ROWS = 9'd160;
+	localparam PIXEL_COUNT = 19'd230400;	//COLS*ROWS*3/2?
+
 	//clocks
 	reg [11:0] clk;
 	initial clk = 0;
@@ -50,20 +54,23 @@ module scope(
 
 	//inter-module signals
 	wire [8:0] x;
-	wire [7:0] adc_data;
-	reg [7:0] adc_data_buff1, adc_data_buff2;
-	initial adc_data_buff2 = 0;
+	wire [7:0] adc_data1, adc_data2;
+	reg [7:0] adc_data1_buff1, adc_data1_buff2, adc_data2_buff1, adc_data2_buff2;
+	initial adc_data1_buff2 = 0;
 	always @(posedge enc_clk) begin
-		adc_data_buff1 <= adc_data;
-		adc_data_buff2 <= adc_data_buff1;
+		adc_data1_buff1 <= adc_data1;
+		adc_data1_buff2 <= adc_data1_buff1;
+		adc_data2_buff1 <= adc_data2;
+		adc_data2_buff2 <= adc_data2_buff1;
 	end
 
 	//encoder debouncing
-	reg [7:0] pos;
+	reg [7:0] pos1, pos2;
 	reg channel;
 	reg enc_a_buff1, enc_a_buff2, enc_b_buff1, enc_b_buff2, enc_sw_buff1, enc_sw_buff2;
 	wire a, b, sw;
-	initial pos = 8'd1;
+	initial pos1 = 8'd1;
+	initial pos2 = 8'd1;
 	initial channel = 1'b1;
 	always @(posedge enc_clk) begin
 		enc_a_buff1 <= enc_a;
@@ -77,12 +84,18 @@ module scope(
 	assign b = enc_b_buff1 && enc_b_buff2;
 	assign sw = !enc_sw_buff1 && enc_sw_buff2;
 
-	//encoder increments adc_data register
+	//encoder increments y offset
 	always @(posedge b) begin
-		if (a)
-			pos <= (pos-1) % 9'd480;
+		if (channel)
+			if (a)
+				pos1 <= (pos1-1) % ROWS;
+			else
+				pos1 <= (pos1+1) % ROWS;
 		else
-			pos <= (pos+1);
+			if (a)
+				pos2 <= (pos2-1) % ROWS;
+			else
+				pos2 <= (pos2+1) % ROWS;
 	end
 	always @(posedge sw) begin
 		channel <= !channel;
@@ -105,11 +118,13 @@ module scope(
 					 .cs(ADC_cs),
 					 .din(ADC_din),
 					 .dout(ADC_dout),
-					 .data(adc_data)
+					 .data1(adc_data1),
+					 .data2(adc_data2)
 	);
 
-	wire [7:0] sum_data;
-	assign sum_data = adc_data_buff2 + pos;
+	wire [7:0] sum_data1, sum_data2;
+	assign sum_data1 = adc_data1_buff2 + pos1;
+	assign sum_data2 = adc_data2_buff2 + pos2;
 	lcd_screen lcd (.clk(lcd_clk),
 					.reset(reset),
 					.cs(LCD_cs),
@@ -118,7 +133,8 @@ module scope(
 					.wrx(LCD_wrx),
 					.Data(LCD_data),
 					.x(x),
-					.adc_data(sum_data),
+					.adc_data1(sum_data1),
+					.adc_data2(sum_data2),
 					.channel(channel)
 	);
 
@@ -132,7 +148,8 @@ module adc_0832ccn(
 	input dout,
 
 	//internal connections
-	output reg [7:0] data
+	output reg [7:0] data1,
+	output reg [7:0] data2
 	);
 
 	localparam IDLE = 2'd0;
@@ -177,13 +194,23 @@ module adc_0832ccn(
 	assign din = state == START ? cmd_start[state_counter] : 1'b0;
 
 	//sequential logic for storing bits
-	reg [7:0] data_buff;
+	reg [7:0] data_buff1, data_buff2;
 	always @(posedge clk) begin
-		if (state == READ)
-			data_buff[7-state_counter] <= dout;
+		if (state == READ) begin
+			if (mux)
+				data_buff1[7-state_counter] <= dout;
+			else
+				data_buff2[7-state_counter] <= dout;
+		end
 
-		if (state == RESET)
-			data <= data_buff;
+		if (state == RESET) begin
+			if (mux)
+				data1 <= data_buff1;
+			else
+				data2 <= data_buff2;
+
+			mux <= !mux;
+		end
 	end
 
 endmodule
@@ -199,7 +226,8 @@ module lcd_screen(
     output reg [15:0] Data,
 
 	output [8:0] x,
-	input [7:0] adc_data,
+	input [7:0] adc_data1,
+	input [7:0] adc_data2,
 	input channel
     );
 	//local parameters
@@ -444,14 +472,18 @@ module lcd_screen(
 			CMD:
 				Data = CMD_MEMWRITE;
 			DATA:
-				if (y == {adc_data, 1'b0})
-					Data = green ? 16'h00f8 : 16'h0;
-				else if (x%20 == 0)
-					Data = blue ? 16'h00f8 : 16'h0;
-				else if (y%10 == 0)
-					Data = blue ? 16'h00f8 : 16'h0;
-				else
-					Data = 16'h0;
+				begin
+					if (y == {adc_data1, 1'b0})
+						Data = red ? 16'h00f0 : 16'h0;
+					else if (y == {adc_data2, 1'b0})
+						Data = green ? 16'h00f0 : 16'h0;
+					else if (x%20 == 0)
+						Data = blue ? 16'h00f0 : 16'h0;
+					else if (y%10 == 0)
+						Data = blue ? 16'h00f0 : 16'h0;
+					else
+						Data = 16'h0;
+				end
 			NOP:
 				Data = CMD_NOP;
 			default:
