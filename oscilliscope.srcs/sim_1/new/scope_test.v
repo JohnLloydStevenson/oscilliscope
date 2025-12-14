@@ -41,9 +41,11 @@ reg reset;
 	//wire clk;
 	//assign clk = tb.my_scope.lcd_clk;
 
-	//wire [8:0] x,y;
-	//assign x = tb.my_scope.lcd.x;
-	//assign y = tb.my_scope.lcd.y;
+	wire [8:0] x,y;
+	assign x = tb.my_scope.x;
+	assign y = tb.my_scope.lcd.y;
+	wire [18:0] cursor;
+	assign cursor = tb.my_scope.lcd.data_cursor;
 
 
 	wire clk, cs, dout, din, data;

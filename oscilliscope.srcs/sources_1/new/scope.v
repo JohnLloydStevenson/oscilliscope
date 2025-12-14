@@ -34,8 +34,8 @@ module scope(
 
 	output ADC_cs,
 	output ADC_clk,
-	output ADC_dout,
-	input ADC_din
+	input ADC_dout,
+	output ADC_din
     );
 	//clocks
 	reg [11:0] clk;
@@ -43,17 +43,49 @@ module scope(
 	always @(posedge sysclk) begin
 		clk <= clk+1;
 	end
-	wire lcd_clk, adc_clk;
+	wire enc_clk, lcd_clk, adc_clk;
+	assign enc_clk = clk[11];
 	assign lcd_clk = clk[3];
-	assign adc_clk = clk[9];
+	assign adc_clk = clk[4];
 
 	//inter-module signals
 	wire [8:0] x;
 	wire [7:0] adc_data;
 	reg [7:0] adc_data_buff1, adc_data_buff2;
-	always @(posedge lcd_clk) begin
+	initial adc_data_buff2 = 0;
+	always @(posedge enc_clk) begin
 		adc_data_buff1 <= adc_data;
 		adc_data_buff2 <= adc_data_buff1;
+	end
+
+	//encoder debouncing
+	reg [7:0] pos;
+	reg channel;
+	reg enc_a_buff1, enc_a_buff2, enc_b_buff1, enc_b_buff2, enc_sw_buff1, enc_sw_buff2;
+	wire a, b, sw;
+	initial pos = 8'd100;
+	initial channel = 1'b1;
+	always @(posedge enc_clk) begin
+		enc_a_buff1 <= enc_a;
+		enc_a_buff2 <= enc_a_buff1;
+		enc_b_buff1 <= enc_b;
+		enc_b_buff2 <= enc_b_buff1;
+		enc_sw_buff1 <= enc_sw;
+		enc_sw_buff2 <= enc_sw_buff1;
+	end
+	assign a = enc_a_buff1 && enc_a_buff2;
+	assign b = enc_b_buff1 && enc_b_buff2;
+	assign sw = !enc_sw_buff1 && enc_sw_buff2;
+	
+	//encoder increments adc_data register
+	always @(posedge b) begin
+		if (a)
+			pos <= (pos-1) % 9'd480;
+		else
+			pos <= (pos+1);
+	end
+	always @(posedge sw) begin
+		channel <= !channel;
 	end
 
 	//Async FIFO for CDC
@@ -76,6 +108,8 @@ module scope(
 					 .data(adc_data)
 	);
 
+	wire [7:0] sum_data;
+	assign sum_data = adc_data_buff2 + pos;
 	lcd_screen lcd (.clk(lcd_clk),
 					.reset(reset),
 					.cs(LCD_cs),
@@ -84,7 +118,8 @@ module scope(
 					.wrx(LCD_wrx),
 					.Data(LCD_data),
 					.x(x),
-					.adc_data(adc_data_buff2)
+					.adc_data(sum_data),
+					.channel(channel)
 	);
 
 endmodule
@@ -93,8 +128,8 @@ module adc_0832ccn(
 	input sysclk,
 	output clk,
 	output cs,	//active low
-	input din,
-	output dout,
+	output din,
+	input dout,
 
 	//internal connections
 	output reg [7:0] data
@@ -139,13 +174,13 @@ module adc_0832ccn(
 
 	assign cs = state == IDLE;
 	assign clk = state != IDLE ? !sysclk : 1'b0;
-	assign dout = state == START ? cmd_start[state_counter] : 1'b0;
+	assign din = state == START ? cmd_start[state_counter] : 1'b0;
 
 	//sequential logic for storing bits
 	reg [7:0] data_buff;
 	always @(posedge clk) begin
 		if (state == READ)
-			data_buff[state_counter] <= din;
+			data_buff[7-state_counter] <= dout;
 
 		if (state == RESET)
 			data <= data_buff;
@@ -164,7 +199,8 @@ module lcd_screen(
     output reg [15:0] Data,
 
 	output [8:0] x,
-	input [7:0] adc_data
+	input [7:0] adc_data,
+	input channel
     );
 	//local parameters
 	localparam BOOT = 0;
@@ -185,31 +221,44 @@ module lcd_screen(
 	localparam CMD_SWRESET = 16'h01;
 	localparam CMD_SLPOUT = 16'h11;
 	localparam CMD_COLMOD = {16'h55, 16'h3a};	//16-bit RGB565
-	localparam CMD_MADCTL = {16'h48, 16'h36};	//RGB order
+	//localparam CMD_MADCTL = {16'h48, 16'h36};	//RGB order
+	localparam CMD_MADCTL = {16'h20, 16'h36};	//RGB order
 	localparam CMD_DISPON = 16'h29;
-	localparam CMD_SETCOL = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2a};	//0-480
-	localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
+	localparam CMD_SETCOL = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2a};	//0-160
+	//localparam CMD_SETCOL = {16'h13f, 16'h0, 16'h2a};	//0-319
+	localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-240
+	//localparam CMD_SETROW = {16'h1df, 16'h0, 16'h2b};	//0-479
+	//localparam CMD_SETROW = {16'hdf, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
+	//localparam CMD_SETROW = {16'h3f, 16'h1, 16'h0, 16'h0, 16'h2b};	//0-320
 	localparam CMD_MEMWRITE = 16'h2c;
 
-	localparam PIXEL_COUNT = 480*320;
+	localparam COLS = 9'd480;
+	localparam ROWS = 9'd160;
+	localparam PIXEL_COUNT = 19'd230400;	//COLS*ROWS*3/2?
 
 
-	//mealy msf state register
+	//mealy fsm state register
 	reg [3:0] state;
 	reg [3:0] next_state;
 	reg [20:0] state_counter;	//1 counter to rule them all
 	reg [18:0] data_cursor;
+	reg [8:0] dummy_data;
 	initial begin
 		state = BOOT;
 		next_state = BOOT;
 		state_counter = 21'b0;
 		data_cursor = 19'b0;
+		dummy_data = 9'b0;
 	end
 
 	//define x and y
 	wire [8:0] y;
-	assign x = (data_cursor/3) / 9'd320;
-	assign y = (data_cursor) % 9'd320;
+	assign x = (data_cursor/3) / ROWS;
+	assign y = (data_cursor/3) % ROWS;
+	wire red, green, blue;
+	assign green = data_cursor % 3 == 0;
+	assign blue = data_cursor % 3 == 1;
+	assign red = data_cursor % 3 == 2;
 
 
 	//msf sequential block
@@ -230,6 +279,12 @@ module lcd_screen(
 			data_cursor <= data_cursor + 1;
 		else
 			data_cursor <= 16'b0;
+
+		//increment dummy data register
+		if (state == NOP)
+			dummy_data <= (dummy_data+1) % ROWS;
+		else if (state == RESET)
+			dummy_data <= 9'd0;
 	end
 
 	//msf combinational block
@@ -393,7 +448,15 @@ module lcd_screen(
 			CMD:
 				Data = CMD_MEMWRITE;
 			DATA:
-				Data = x < {adc_data, 1'b0} ? 16'hff : 16'b0;
+				//Data = x < {adc_data, 1'b0} ? 16'hff : 16'b0;
+				if (x%20 == 0)
+					Data = blue ? 16'h00f8 : 16'h0;
+				else if (y%10 == 0)
+					Data = blue ? 16'h00f8 : 16'h0;
+				else if (channel)
+					Data = x == {adc_data, 1'b0} ? (green ? 16'h00f8 : 16'h0) : 16'b0;
+				else
+					Data = y == {adc_data, 1'b0} ? (green ? 16'h00f8 : 16'h0) : 16'b0;
 			NOP:
 				Data = CMD_NOP;
 			default:
